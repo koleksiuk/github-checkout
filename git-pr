@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+
+begin
+  require "octokit"
+rescue LoadError
+  puts __FILE__
+  puts "octokit not installed. Run `bundle install` in #{File.dirname(File.readlink(__FILE__))}"
+  puts ""
+  puts "and re-run command"
+  exit(1)
+end
+
+require "json"
+
+file_path = "/Users/#{`whoami`.strip}/.git-pr-config"
+
+default_config = { token: "", remote: "origin" }
+
+config = begin
+           JSON.parse(File.read(file_path))
+         rescue
+           File.open(file_path, "w") do |f|
+             f.write(JSON.pretty_generate(default_config))
+           end
+
+           puts "Default config created. Add token to ~/.git-pr-config"
+           exit(1)
+         end
+
+if ARGV.count == 1
+  remote = config["remote"]
+  repo_url = ARGV[0]
+else
+  remote = ARGV[0]
+  repo_url = ARGV[1]
+end
+
+token = config["token"]
+
+client = Octokit::Client.new(access_token: token)
+
+repo = `git remote get-url #{remote}`.strip
+
+repo_name = repo.match(/.*:(?<name>.*).git/)[:name]
+
+pull_requests = client.pull_requests(repo_name, state: "open")
+
+pr = pull_requests.find {|p| p[:html_url] == repo_url }
+
+`git fetch #{remote} pull/#{pr[:number]}/head:#{pr[:head][:ref]}`
+`git checkout #{pr[:head][:ref]}`
