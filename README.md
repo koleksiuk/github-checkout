@@ -2,7 +2,7 @@
 1. Clone repo
 2. cd ./github-checkout
 3. bundle install
-4. `ln -s git-pr /usr/local/bin/git-pr`
+4. `ln -s ./git-pr /usr/local/bin/git-pr`
 5. `chmod +x /usr/local/bin/git-pr`
 
 # Create Github token
