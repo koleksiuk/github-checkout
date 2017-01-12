@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+DEFAULT_CONFIG = { token: "", remote: "origin" }
+
 begin
   require "octokit"
 rescue LoadError
@@ -10,42 +12,119 @@ rescue LoadError
   exit(1)
 end
 
-require "json"
-
-file_path = "/Users/#{`whoami`.strip}/.git-pr-config"
-
-default_config = { token: "", remote: "origin" }
-
-config = begin
-           JSON.parse(File.read(file_path))
-         rescue
-           File.open(file_path, "w") do |f|
-             f.write(JSON.pretty_generate(default_config))
-           end
-
-           puts "Default config created. Add token to ~/.git-pr-config"
-           exit(1)
-         end
-
-if ARGV.count == 1
-  remote = config["remote"]
-  repo_url = ARGV[0]
-else
-  remote = ARGV[0]
-  repo_url = ARGV[1]
+def run_and_log(command)
+  puts "#{command}"
+  `#{command}`.tap do |r|
+    puts(r) if r.length > 0
+  end
 end
 
-token = config["token"]
+def check_command!(command)
+  unless %w(fetch pull).include?(command)
+    puts "Unknown command: #{command}"
+    exit(1)
+  end
+end
 
-client = Octokit::Client.new(access_token: token)
+def config_path
+  "/Users/#{`whoami`.strip}/.git-pr-config"
+end
 
-repo = `git remote get-url #{remote}`.strip
+def write_config(config_hash)
+  File.open(config_path, "w") do |f|
+    f.write(JSON.pretty_generate(config_hash))
+  end
+end
 
-repo_name = repo.match(/.*:(?<name>.*).git/)[:name]
+def read_config
+  JSON.parse(File.read(config_path))
+rescue
+  write_config(DEFAULT_CONFIG)
 
-pull_requests = client.pull_requests(repo_name, state: "open")
+  puts "Default config created. Add token to ~/.git-pr-config"
+  exit(1)
+end
 
-pr = pull_requests.find {|p| p[:html_url] == repo_url }
+def store_pr_data(pr_data, config)
+  data_to_save = {
+    "number" => pr_data[:number],
+    "head" => { "ref" => pr_data[:head][:ref] }
+  }
+  puts "Storing PR data in config. Run git-pr pull to get newest changes"
+  write_config(config.merge("recent_pr_data" => data_to_save))
+end
 
-`git fetch #{remote} pull/#{pr[:number]}/head:#{pr[:head][:ref]}`
-`git checkout #{pr[:head][:ref]}`
+def pr_data_from_config(config)
+  data = config["recent_pr_data"]
+  return unless data
+
+  {
+    number: data["number"],
+    head: { ref: data["head"]["ref"] }
+  }
+end
+
+def fetch_pr_data(config, remote, repo_url)
+  token = config["token"]
+
+  client = Octokit::Client.new(access_token: token)
+
+  repo = run_and_log("git remote get-url #{remote}").strip
+
+  repo_name = repo.match(/.*:(?<name>.*).git/)[:name]
+
+  pull_requests = client.pull_requests(repo_name, state: "open")
+
+  pull_requests.find { |p| p[:html_url] == repo_url }
+end
+
+def fetch_and_checkout(config, remote, repo_url)
+  pr = fetch_pr_data(config, remote, repo_url)
+
+  unless pr
+    puts "PR #{repo_url} in remote #{remote} not found"
+    exit(1)
+  end
+
+  run_and_log("git fetch #{remote} pull/#{pr[:number]}/head:#{pr[:head][:ref]}")
+  run_and_log("git checkout #{pr[:head][:ref]}")
+  store_pr_data(pr, config)
+end
+
+def pull(config, remote, repo_url)
+  pr = pr_data_from_config(config) || fetch_pr_data(config, remote, repo_url)
+
+  unless pr
+    puts "PR #{repo_url} in remote #{remote} not found"
+    exit(1)
+  end
+
+  run_and_log("git pull #{remote} pull/#{pr[:number]}/head:#{pr[:head][:ref]}")
+end
+
+require "json"
+
+config = read_config
+
+modifiers = ARGV.select { |a| a.start_with?("-") }
+arguments = ARGV - modifiers
+
+command = arguments[0]
+
+check_command!(command)
+
+if arguments.count == 1
+  remote = config["remote"]
+elsif arguments.count == 2
+  repo_url = arguments[1]
+  remote = config["remote"]
+elsif arguments.count == 3
+  remote = arguments[1]
+  repo_url = arguments[2]
+end
+
+if command == "pull"
+  pull(config, remote, repo_url)
+elsif command == "fetch"
+  fetch_and_checkout(config, remote, repo_url)
+end
