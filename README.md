@@ -17,7 +17,10 @@
 # Usage
 
 Fetch from default remote saved in git-pr-config:
-`git-pr https://github.com/org/repo/pull/3`
+`git-pr fetch https://github.com/org/repo/pull/3`
 
 Fetch from different remote:
-`git-pr aaron https://github.com/org/repo/pull/3`
+`git-pr fetch aaron https://github.com/org/repo/pull/3`
+
+In order to pull newest changes:
+`git-pr pull`
